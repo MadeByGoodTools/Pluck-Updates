@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Good Tools Installer — Pluck</title>
+  <welcome file="welcome.html"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+  <choices-outline>
+    <line choice="pluck"/>
+  </choices-outline>
+  <choice id="pluck" visible="false" title="Pluck">
+    <pkg-ref id="ca.goodtools.pluck.pkg"/>
+  </choice>
+  <pkg-ref id="ca.goodtools.pluck.pkg" version="0.1.0" onConclusion="none">Pluck-component.pkg</pkg-ref>
+</installer-gui-script>

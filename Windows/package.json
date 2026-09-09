@@ -1,0 +1,40 @@
+{
+  "name": "pluck-windows",
+  "version": "0.1.0",
+  "description": "Pluck by Good Tools — careful app removal and space reclaiming for Windows",
+  "main": "src/main.js",
+  "author": "Good Tools",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "ca.goodtools.pluck",
+    "productName": "Pluck",
+    "asar": true,
+    "files": ["src/**/*", "assets/**/*", "package.json"],
+    "directories": { "output": "dist" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/pluck.png",
+      "requestedExecutionLevel": "requireAdministrator",
+      "legalTrademarks": "Good Tools",
+      "artifactName": "GoodTools-Installer-Pluck-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pluck",
+      "uninstallDisplayName": "Pluck by Good Tools",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

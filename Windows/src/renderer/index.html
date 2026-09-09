@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pluck</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="../../assets/pluck.png" alt="">
+      <div><h1>Pluck</h1><span>by Good Tools</span></div>
+      <button id="quit" class="quiet">Quit</button>
+    </header>
+
+    <nav><button data-tab="uninstall" class="active">Uninstall</button><button data-tab="reclaim">Reclaim</button></nav>
+
+    <section class="permission" id="permission"><span id="permissionText">Checking permissions…</span><button id="admin" class="quiet">Run as administrator</button></section>
+
+    <section class="storage">
+      <div><span>FREE</span><strong id="free">—</strong></div>
+      <div><span>PURGEABLE</span><strong id="purgeable">—</strong></div>
+      <div><span>AVAILABLE</span><strong id="available">—</strong></div>
+    </section>
+
+    <section id="uninstall" class="tab active">
+      <div class="list" id="apps"><p class="loading">Reading installed applications…</p></div>
+      <footer><span id="appCount"></span><button id="uninstallButton" class="primary" disabled>Uninstall</button></footer>
+    </section>
+
+    <section id="reclaim" class="tab">
+      <label class="master-row">
+        <input type="checkbox" id="purgeCheck">
+        <img src="../../assets/pluck.png" alt="">
+        <span><strong>Purgeable space</strong><small>Safe temporary and cache items shown below</small></span>
+        <b id="safeTotal">—</b>
+      </label>
+      <div class="list details" id="reclaimables"><p class="loading">Scanning safe locations…</p></div>
+      <footer><button id="emptyTrash" class="quiet">Empty Recycle Bin…</button><button id="reclaimButton" class="primary" disabled>Reclaim Space</button></footer>
+    </section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>
