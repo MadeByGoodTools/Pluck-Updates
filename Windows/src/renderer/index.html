@@ -21,7 +21,7 @@
     <section class="storage">
       <div><span>FREE</span><strong id="free">—</strong></div>
       <div><span>PURGEABLE</span><strong id="purgeable">—</strong></div>
-      <div><span>AVAILABLE</span><strong id="available">—</strong></div>
+      <div class="available"><span>AVAILABLE WHEN NEEDED</span><strong id="available">—</strong></div>
     </section>
 
     <section id="uninstall" class="tab active">
@@ -30,14 +30,8 @@
     </section>
 
     <section id="reclaim" class="tab">
-      <label class="master-row">
-        <input type="checkbox" id="purgeCheck">
-        <img src="../../assets/pluck.png" alt="">
-        <span><strong>Purgeable space</strong><small>Safe temporary and cache items shown below</small></span>
-        <b id="safeTotal">—</b>
-      </label>
       <div class="list details" id="reclaimables"><p class="loading">Scanning safe locations…</p></div>
-      <footer><button id="emptyTrash" class="quiet">Empty Recycle Bin…</button><button id="reclaimButton" class="primary" disabled>Reclaim Space</button></footer>
+      <footer><button id="scan" class="quiet">Scan</button><button id="emptyTrash" class="quiet">Empty Recycle Bin…</button><button id="reclaimButton" class="primary" disabled>Reclaim</button></footer>
     </section>
   </main>
   <script src="renderer.js"></script>

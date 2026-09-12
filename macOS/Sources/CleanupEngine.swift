@@ -131,7 +131,6 @@ enum CleanupEngine {
     static func scanReclaimable() -> [CleanupItem] {
         var items: [CleanupItem] = []
         let roots: [(String, String, String)] = [
-            (".Trash", "Trash", "Emptying Trash permanently frees this space"),
             ("Library/Caches", "Cache", "Apps recreate caches when needed"),
             ("Library/Logs", "Logs", "Diagnostic history"),
             ("Library/Developer/Xcode/DerivedData", "Developer", "Regenerable Xcode build data"),

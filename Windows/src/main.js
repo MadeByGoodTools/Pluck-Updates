@@ -56,7 +56,7 @@ async function directorySize(target) {
 
 function createPanel() {
   panel = new BrowserWindow({
-    width: 520,
+    width: 600,
     height: 680,
     show: false,
     frame: false,

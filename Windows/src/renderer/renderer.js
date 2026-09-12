@@ -19,11 +19,14 @@ function updateAppButton() {
 
 function renderReclaimables() {
   const total = reclaimables.reduce((sum, item) => sum + item.size, 0);
-  $('#safeTotal').textContent = format(total);
   $('#purgeable').textContent = format(total);
-  $('#reclaimables').innerHTML = reclaimables.map(item => `<div class="row"><img src="../../assets/folder.png" alt=""><span><strong>${esc(item.name)}</strong><small>${esc(item.detail)}</small></span><b>${format(item.size)}</b></div>`).join('') || '<p class="loading">No large safe cleanup items found.</p>';
-  $('#purgeCheck').checked = false;
-  $('#reclaimButton').disabled = true;
+  $('#reclaimables').innerHTML = reclaimables.map(item => `<label class="row"><input type="checkbox" data-reclaim="${item.id}" checked><img src="../../assets/folder.png" alt=""><span><strong>${esc(item.name)}</strong><small>${esc(item.detail)}</small></span><b>${format(item.size)}</b></label>`).join('') || '<p class="loading">No large safe cleanup items found.</p>';
+  document.querySelectorAll('[data-reclaim]').forEach(box => box.addEventListener('change', updateReclaimButton));
+  updateReclaimButton();
+}
+
+function updateReclaimButton() {
+  $('#reclaimButton').disabled = document.querySelectorAll('[data-reclaim]:checked').length === 0;
 }
 
 async function load() {
@@ -42,15 +45,16 @@ document.querySelectorAll('nav button').forEach(button => button.addEventListene
   button.classList.add('active'); $(`#${button.dataset.tab}`).classList.add('active');
 }));
 
-$('#purgeCheck').addEventListener('change', event => { $('#reclaimButton').disabled = !event.target.checked || !reclaimables.length; });
 $('#uninstallButton').addEventListener('click', async () => {
   const ids = [...document.querySelectorAll('[data-app]:checked')].map(box => box.dataset.app);
   await window.pluck.uninstall(ids);
 });
 $('#reclaimButton').addEventListener('click', async () => {
-  const result = await window.pluck.reclaim(reclaimables.map(item => item.id));
+  const ids = [...document.querySelectorAll('[data-reclaim]:checked')].map(box => box.dataset.reclaim);
+  const result = await window.pluck.reclaim(ids);
   if (result.ok) { reclaimables = await window.pluck.scanReclaimable(); renderReclaimables(); }
 });
+$('#scan').addEventListener('click', async () => { reclaimables = await window.pluck.scanReclaimable(); renderReclaimables(); });
 $('#emptyTrash').addEventListener('click', () => window.pluck.emptyTrash());
 $('#admin').addEventListener('click', () => window.pluck.restartAsAdmin());
 $('#quit').addEventListener('click', () => window.pluck.quit());
