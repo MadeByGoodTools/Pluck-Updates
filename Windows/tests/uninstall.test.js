@@ -29,6 +29,30 @@ test('prefers the registered quiet command', () => {
   assert.deepEqual(plan.successCodes, [0]);
 });
 
+test('quotes an unquoted uninstall executable whose path contains spaces', () => {
+  const plan = createUninstallPlan({
+    UninstallString: 'C:\\Program Files\\Example App\\remove.exe /uninstall'
+  });
+  assert.equal(plan.args[3], '"C:\\Program Files\\Example App\\remove.exe" /uninstall');
+});
+
+test('runs an Inno Setup uninstaller quietly without allowing a restart', () => {
+  const plan = createUninstallPlan({
+    PSChildName: 'Old Classic Calculator for Windows 11 and Windows 10_is1',
+    UninstallString: 'C:\\Program Files\\OldClassicCalc\\unins000.exe'
+  });
+  assert.equal(plan.file, 'C:\\Program Files\\OldClassicCalc\\unins000.exe');
+  assert.deepEqual(plan.args, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART']);
+});
+
+test('does not modify vendor-provided quiet Inno Setup arguments', () => {
+  const plan = createUninstallPlan({
+    QuietUninstallString: '"C:\\Program Files\\Example\\unins000.exe" /SILENT /NORESTART',
+    UninstallString: '"C:\\Program Files\\Example\\unins000.exe"'
+  });
+  assert.equal(plan.args[3], '"C:\\Program Files\\Example\\unins000.exe" /SILENT /NORESTART');
+});
+
 test('returns null when Windows provides no uninstall command', () => {
   assert.equal(createUninstallPlan({}), null);
 });
