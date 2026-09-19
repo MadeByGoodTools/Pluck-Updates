@@ -47,7 +47,23 @@ document.querySelectorAll('nav button').forEach(button => button.addEventListene
 
 $('#uninstallButton').addEventListener('click', async () => {
   const ids = [...document.querySelectorAll('[data-app]:checked')].map(box => box.dataset.app);
-  await window.pluck.uninstall(ids);
+  const button = $('#uninstallButton');
+  button.disabled = true;
+  button.textContent = 'Uninstalling…';
+  try {
+    const result = await window.pluck.uninstall(ids);
+    if (!result.cancelled) {
+      await new Promise(resolve => setTimeout(resolve, 750));
+      apps = await window.pluck.scanApps();
+      renderApps();
+      if (result.completed) $('#appCount').textContent = `${result.completed} removed`;
+    }
+  } catch (error) {
+    $('#appCount').textContent = `Uninstall failed: ${error.message}`;
+  } finally {
+    button.textContent = 'Uninstall';
+    button.disabled = document.querySelectorAll('[data-app]:checked').length === 0;
+  }
 });
 $('#reclaimButton').addEventListener('click', async () => {
   const ids = [...document.querySelectorAll('[data-reclaim]:checked')].map(box => box.dataset.reclaim);

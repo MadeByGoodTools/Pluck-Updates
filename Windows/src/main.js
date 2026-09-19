@@ -4,11 +4,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { createUninstallPlan } = require('./uninstall');
 
 let tray;
 let panel;
 let applications = new Map();
 let reclaimables = new Map();
+let suspendAutoHide = false;
 
 app.setAppUserModelId('ca.goodtools.pluck');
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -19,6 +21,27 @@ function runPowerShell(script) {
       { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout, stderr) => error ? reject(new Error(stderr.trim() || error.message)) : resolve(stdout.trim()));
   });
+}
+
+function runProcess(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const { successCodes = [0], ...spawnOptions } = options;
+    const child = spawn(file, args, { windowsHide: false, stdio: 'ignore', ...spawnOptions });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (successCodes.includes(code)) resolve();
+      else reject(new Error(`${path.basename(file)} exited with ${code ?? signal ?? 'an unknown error'}`));
+    });
+  });
+}
+
+async function showPanelMessage(options) {
+  suspendAutoHide = true;
+  try {
+    return await dialog.showMessageBox(panel, options);
+  } finally {
+    suspendAutoHide = false;
+  }
 }
 
 async function isAdministrator() {
@@ -74,7 +97,7 @@ function createPanel() {
     }
   });
   panel.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  panel.on('blur', () => panel.hide());
+  panel.on('blur', () => { if (!suspendAutoHide) panel.hide(); });
   panel.on('close', event => { if (!app.isQuitting) { event.preventDefault(); panel.hide(); } });
 }
 
@@ -102,7 +125,7 @@ app.on('window-all-closed', () => {});
 
 ipcMain.handle('snapshot', async () => ({ ...(await storageSnapshot()), admin: await isAdministrator() }));
 
-ipcMain.handle('scan-apps', async () => {
+async function scanInstalledApps() {
   const script = `
     $roots = @(
       'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
@@ -111,7 +134,7 @@ ipcMain.handle('scan-apps', async () => {
     )
     @(Get-ItemProperty $roots -ErrorAction SilentlyContinue |
       Where-Object { $_.DisplayName -and ($_.UninstallString -or $_.QuietUninstallString) } |
-      Select-Object DisplayName,Publisher,DisplayVersion,EstimatedSize,InstallLocation,WindowsInstaller,PSPath,UninstallString,QuietUninstallString |
+      Select-Object DisplayName,Publisher,DisplayVersion,EstimatedSize,InstallLocation,WindowsInstaller,PSPath,PSChildName,UninstallString,QuietUninstallString |
       Sort-Object DisplayName -Unique) | ConvertTo-Json -Compress
   `;
   try {
@@ -134,7 +157,9 @@ ipcMain.handle('scan-apps', async () => {
       };
     });
   } catch { return []; }
-});
+}
+
+ipcMain.handle('scan-apps', scanInstalledApps);
 
 ipcMain.handle('scan-reclaimable', async () => {
   const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
@@ -165,8 +190,8 @@ ipcMain.handle('scan-reclaimable', async () => {
 
 ipcMain.handle('uninstall', async (_event, ids) => {
   const chosen = ids.map(id => applications.get(id)).filter(Boolean);
-  if (!chosen.length) return { ok: false };
-  const answer = await dialog.showMessageBox(panel, {
+  if (!chosen.length) return { ok: false, completed: 0, failed: 0 };
+  const answer = await showPanelMessage({
     type: 'warning',
     buttons: ['Uninstall', 'Cancel'],
     defaultId: 1,
@@ -175,16 +200,39 @@ ipcMain.handle('uninstall', async (_event, ids) => {
     message: `Uninstall ${chosen.length === 1 ? chosen[0].DisplayName : `${chosen.length} applications`}?`,
     detail: 'Pluck directly removes eligible per-user apps. Complex apps with MSI packages, services, or system components use their registered uninstaller so Windows is not left damaged.'
   });
-  if (answer.response !== 0) return { ok: false };
+  if (answer.response !== 0) return { ok: false, cancelled: true, completed: 0, failed: 0 };
+
+  panel.hide();
+  const completed = [];
+  const failures = [];
   for (const item of chosen) {
-    if (isFastRemovalEligible(item)) await fastRemove(item);
-    else {
-      const command = item.QuietUninstallString || item.UninstallString;
-      if (command) spawn('cmd.exe', ['/d', '/s', '/c', command], { detached: true, windowsHide: false, stdio: 'ignore' }).unref();
+    try {
+      if (isFastRemovalEligible(item)) await fastRemove(item);
+      else await runRegisteredUninstaller(item);
+      completed.push(item.DisplayName);
+    } catch (error) {
+      failures.push({ name: item.DisplayName, message: error.message });
     }
   }
-  return { ok: true };
+
+  positionAndShow();
+  if (failures.length) {
+    await showPanelMessage({
+      type: 'warning',
+      buttons: ['OK'],
+      title: 'Pluck',
+      message: `${failures.length} ${failures.length === 1 ? 'app was' : 'apps were'} not removed`,
+      detail: failures.map(failure => `${failure.name}: ${failure.message}`).join('\n')
+    });
+  }
+  return { ok: failures.length === 0, completed: completed.length, failed: failures.length };
 });
+
+async function runRegisteredUninstaller(item) {
+  const plan = createUninstallPlan(item);
+  if (!plan) throw new Error('No registered uninstall command was found.');
+  await runProcess(plan.file, plan.args, { successCodes: plan.successCodes });
+}
 
 function isFastRemovalEligible(item) {
   const install = String(item.InstallLocation || '');
@@ -204,7 +252,14 @@ async function fastRemove(item) {
   await fs.promises.writeFile(path.join(backupRoot, `${Date.now()}-${name || 'app'}.json`), JSON.stringify(item, null, 2));
 
   await runPowerShell(`Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith(${psQuote(install)}, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue`).catch(() => {});
-  const targets = [install];
+  try {
+    await fs.promises.access(install);
+    await shell.trashItem(install);
+  } catch (error) {
+    throw new Error(`Could not move the application folder to the Recycle Bin: ${error.message}`);
+  }
+
+  const targets = [];
   for (const root of [process.env.APPDATA, process.env.LOCALAPPDATA]) {
     if (!root || !name) continue;
     const candidate = path.join(root, name);
