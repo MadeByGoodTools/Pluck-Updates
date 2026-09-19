@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { createUninstallPlan } = require('./uninstall');
+const { createUninstallPlans } = require('./uninstall');
 
 let tray;
 let panel;
@@ -23,14 +23,39 @@ function runPowerShell(script) {
   });
 }
 
+function expandWindowsEnvironment(value) {
+  return String(value).replace(/%([^%]+)%/g, (match, name) => process.env[name] || process.env[name.toUpperCase()] || match);
+}
+
 function runProcess(file, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const { successCodes = [0], ...spawnOptions } = options;
-    const child = spawn(file, args, { windowsHide: false, stdio: 'ignore', ...spawnOptions });
-    child.once('error', reject);
+    const { successCodes = [0], timeoutMs = 10 * 60 * 1000, quiet = false, ...spawnOptions } = options;
+    const executable = expandWindowsEnvironment(file);
+    const expandedArgs = args.map(expandWindowsEnvironment);
+    const child = spawn(executable, expandedArgs, { windowsHide: quiet, stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
+    let output = '';
+    let settled = false;
+    const remember = chunk => { output = `${output}${chunk}`.slice(-8192); };
+    child.stdout?.on('data', remember);
+    child.stderr?.on('data', remember);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' }).unref();
+      reject(new Error(`${path.basename(executable)} did not finish within 10 minutes`));
+    }, timeoutMs);
+    child.once('error', error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
     child.once('exit', (code, signal) => {
-      if (successCodes.includes(code)) resolve();
-      else reject(new Error(`${path.basename(file)} exited with ${code ?? signal ?? 'an unknown error'}`));
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (successCodes.includes(code)) resolve({ code, output: output.trim() });
+      else reject(new Error(`${path.basename(executable)} exited with ${code ?? signal ?? 'an unknown error'}${output.trim() ? `: ${output.trim()}` : ''}`));
     });
   });
 }
@@ -132,10 +157,23 @@ async function scanInstalledApps() {
       'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
       'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
     )
-    @(Get-ItemProperty $roots -ErrorAction SilentlyContinue |
+    $registryApps = @(Get-ItemProperty $roots -ErrorAction SilentlyContinue |
       Where-Object { $_.DisplayName -and ($_.UninstallString -or $_.QuietUninstallString) } |
-      Select-Object DisplayName,Publisher,DisplayVersion,EstimatedSize,InstallLocation,WindowsInstaller,PSPath,PSChildName,UninstallString,QuietUninstallString |
-      Sort-Object DisplayName -Unique) | ConvertTo-Json -Compress
+      Select-Object DisplayName,Publisher,DisplayVersion,EstimatedSize,InstallLocation,WindowsInstaller,PSPath,PSChildName,UninstallString,QuietUninstallString,@{n='Kind';e={'Registry'}})
+    $packageApps = @(Get-AppxPackage -PackageTypeFilter Main,Bundle -ErrorAction SilentlyContinue |
+      Where-Object { -not $_.IsFramework -and -not $_.NonRemovable } |
+      ForEach-Object {
+        $display = $_.Name
+        try {
+          $candidate = (Get-AppxPackageManifest $_ -ErrorAction Stop).Package.Properties.DisplayName
+          if ($candidate -and $candidate -notlike 'ms-resource:*') { $display = $candidate }
+        } catch {}
+        [PSCustomObject]@{
+          DisplayName=$display; Publisher=$_.PublisherId; DisplayVersion=$_.Version.ToString(); EstimatedSize=0;
+          InstallLocation=$_.InstallLocation; PackageFullName=$_.PackageFullName; Kind='Appx'
+        }
+      })
+    @($registryApps + $packageApps) | Sort-Object DisplayName -Unique | ConvertTo-Json -Compress
   `;
   try {
     const raw = await runPowerShell(script);
@@ -205,12 +243,26 @@ ipcMain.handle('uninstall', async (_event, ids) => {
   panel.hide();
   const completed = [];
   const failures = [];
-  for (const item of chosen) {
+  const logPath = await createUninstallLog();
+  for (const [index, item] of chosen.entries()) {
+    sendUninstallProgress(item.DisplayName, index + 1, chosen.length, 'Preparing');
     try {
-      if (isFastRemovalEligible(item)) await fastRemove(item);
-      else await runRegisteredUninstaller(item);
+      await appendUninstallLog(logPath, { event: 'start', app: item.DisplayName, kind: item.Kind || 'Registry' });
+      await closeRelatedProcesses(item);
+      if (isFastRemovalEligible(item)) {
+        sendUninstallProgress(item.DisplayName, index + 1, chosen.length, 'Removing');
+        await fastRemove(item);
+      } else {
+        await runRegisteredUninstaller(item, logPath, index + 1, chosen.length);
+      }
+      const verified = await waitForRemoval(item);
+      if (!verified.registrationGone || !verified.installGone) {
+        throw new Error(verified.registrationGone ? 'The app entry was removed, but its installation folder is still present.' : 'Windows still reports the app as installed.');
+      }
+      await appendUninstallLog(logPath, { event: 'complete', app: item.DisplayName });
       completed.push(item.DisplayName);
     } catch (error) {
+      await appendUninstallLog(logPath, { event: 'failed', app: item.DisplayName, error: error.message });
       failures.push({ name: item.DisplayName, message: error.message });
     }
   }
@@ -222,16 +274,97 @@ ipcMain.handle('uninstall', async (_event, ids) => {
       buttons: ['OK'],
       title: 'Pluck',
       message: `${failures.length} ${failures.length === 1 ? 'app was' : 'apps were'} not removed`,
-      detail: failures.map(failure => `${failure.name}: ${failure.message}`).join('\n')
+      detail: `${failures.map(failure => `${failure.name}: ${failure.message}`).join('\n')}\n\nDetails were saved to:\n${logPath}`
     });
   }
-  return { ok: failures.length === 0, completed: completed.length, failed: failures.length };
+  return { ok: failures.length === 0, completed: completed.length, failed: failures.length, logPath };
 });
 
-async function runRegisteredUninstaller(item) {
-  const plan = createUninstallPlan(item);
-  if (!plan) throw new Error('No registered uninstall command was found.');
-  await runProcess(plan.file, plan.args, { successCodes: plan.successCodes });
+function sendUninstallProgress(name, current, total, stage) {
+  if (panel && !panel.isDestroyed()) panel.webContents.send('uninstall-progress', { name, current, total, stage });
+}
+
+async function createUninstallLog() {
+  const folder = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'Pluck', 'Logs');
+  await fs.promises.mkdir(folder, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return path.join(folder, `uninstall-${stamp}.jsonl`);
+}
+
+async function appendUninstallLog(logPath, entry) {
+  const record = JSON.stringify({ time: new Date().toISOString(), ...entry });
+  await fs.promises.appendFile(logPath, `${record}\n`).catch(() => {});
+}
+
+async function closeRelatedProcesses(item) {
+  const roots = [String(item.InstallLocation || '').trim()].filter(Boolean);
+  if (!roots.length) return;
+  const rootsScript = roots.map(psQuote).join(',');
+  await runPowerShell(`$roots = @(${rootsScript}); Get-Process -ErrorAction SilentlyContinue | Where-Object { $path = $_.Path; $path -and ($roots | Where-Object { $path.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) }) } | Stop-Process -Force -ErrorAction SilentlyContinue`).catch(() => {});
+}
+
+async function removalState(item) {
+  let registrationGone = true;
+  if (item.Kind === 'Appx' && item.PackageFullName) {
+    const result = await runPowerShell(`if (Get-AppxPackage -PackageTypeFilter Main,Bundle | Where-Object PackageFullName -eq ${psQuote(item.PackageFullName)}) { 'present' } else { 'gone' }`).catch(() => 'present');
+    registrationGone = result.trim() === 'gone';
+  } else if (item.PSPath) {
+    const result = await runPowerShell(`if (Test-Path -LiteralPath ${psQuote(item.PSPath)}) { 'present' } else { 'gone' }`).catch(() => 'present');
+    registrationGone = result.trim() === 'gone';
+  }
+  let installGone = true;
+  const install = String(item.InstallLocation || '').trim();
+  if (install) installGone = !(await fs.promises.access(install).then(() => true).catch(() => false));
+  return { registrationGone, installGone };
+}
+
+async function waitForRemoval(item, attempts = 16) {
+  let state = await removalState(item);
+  for (let attempt = 1; attempt < attempts && (!state.registrationGone || !state.installGone); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    state = await removalState(item);
+  }
+  return state;
+}
+
+async function removeVerifiedLeftoverFolder(item) {
+  const install = String(item.InstallLocation || '').trim();
+  if (!install) return;
+  const resolved = path.resolve(install);
+  const appName = String(item.DisplayName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const folderName = path.basename(resolved).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const genericFolders = new Set(['adobe', 'apple', 'commonfiles', 'google', 'microsoft', 'programfiles', 'programs', 'windows', 'windowsapps']);
+  const protectedRoots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramData, process.env.SystemRoot]
+    .filter(Boolean).map(value => path.resolve(value).toLowerCase());
+  const appSpecific = folderName.length >= 5 && !genericFolders.has(folderName) && (appName.includes(folderName) || folderName.includes(appName));
+  if (!appSpecific || protectedRoots.includes(resolved.toLowerCase()) || resolved.length < 8) return;
+  try { await fs.promises.access(resolved); await shell.trashItem(resolved); } catch { }
+}
+
+async function runRegisteredUninstaller(item, logPath, current, total) {
+  const plans = createUninstallPlans(item);
+  if (!plans.length) throw new Error('No registered uninstall command was found.');
+  let lastError;
+  for (const plan of plans) {
+    sendUninstallProgress(item.DisplayName, current, total, plan.quiet ? 'Removing quietly' : 'Waiting for uninstaller');
+    await appendUninstallLog(logPath, { event: 'attempt', app: item.DisplayName, method: plan.label, file: plan.file });
+    try {
+      await runProcess(plan.file, plan.args, { successCodes: plan.successCodes, quiet: plan.quiet });
+      let state = await waitForRemoval(item);
+      if (state.registrationGone && !state.installGone) {
+        await removeVerifiedLeftoverFolder(item);
+        state = await waitForRemoval(item, 4);
+      }
+      if (state.registrationGone && state.installGone) return;
+      lastError = new Error(state.registrationGone ? 'The uninstaller left its application folder behind.' : 'The uninstaller finished, but Windows still reports the app as installed.');
+      await appendUninstallLog(logPath, { event: 'verification-failed', app: item.DisplayName, method: plan.label, ...state });
+      if (state.registrationGone) break;
+    } catch (error) {
+      lastError = error;
+      await appendUninstallLog(logPath, { event: 'attempt-failed', app: item.DisplayName, method: plan.label, error: error.message });
+    }
+  }
+  throw lastError || new Error('The registered uninstaller did not complete.');
 }
 
 function isFastRemovalEligible(item) {

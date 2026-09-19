@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('pluck', {
   scanApps: () => ipcRenderer.invoke('scan-apps'),
   scanReclaimable: () => ipcRenderer.invoke('scan-reclaimable'),
   uninstall: ids => ipcRenderer.invoke('uninstall', ids),
+  onUninstallProgress: callback => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('uninstall-progress', listener);
+    return () => ipcRenderer.removeListener('uninstall-progress', listener);
+  },
   reclaim: ids => ipcRenderer.invoke('reclaim', ids),
   emptyTrash: () => ipcRenderer.invoke('empty-trash'),
   restartAsAdmin: () => ipcRenderer.invoke('restart-admin'),

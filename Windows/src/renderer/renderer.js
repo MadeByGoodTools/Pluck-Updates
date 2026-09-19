@@ -3,6 +3,10 @@ const format = bytes => bytes ? new Intl.NumberFormat(undefined, { style: 'unit'
 let apps = [];
 let reclaimables = [];
 
+window.pluck.onUninstallProgress(progress => {
+  $('#appCount').textContent = `${progress.stage} ${progress.current} of ${progress.total}: ${progress.name}`;
+});
+
 function esc(value) { const node = document.createElement('span'); node.textContent = value || ''; return node.innerHTML; }
 
 function renderApps() {
