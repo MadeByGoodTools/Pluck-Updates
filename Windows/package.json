@@ -1,6 +1,6 @@
 {
   "name": "pluck-windows",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Pluck by Good Tools — careful app removal and space reclaiming for Windows",
   "main": "src/main.js",
   "author": "Good Tools",

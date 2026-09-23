@@ -2,6 +2,7 @@ const $ = selector => document.querySelector(selector);
 const format = bytes => bytes ? new Intl.NumberFormat(undefined, { style: 'unit', unit: bytes >= 1073741824 ? 'gigabyte' : 'megabyte', maximumFractionDigits: bytes >= 1073741824 ? 1 : 0 }).format(bytes / (bytes >= 1073741824 ? 1073741824 : 1048576)) : '—';
 let apps = [];
 let reclaimables = [];
+let appScanPromise = null;
 
 window.pluck.onUninstallProgress(progress => {
   $('#appCount').textContent = `${progress.stage} ${progress.current} of ${progress.total}: ${progress.name}`;
@@ -9,10 +10,38 @@ window.pluck.onUninstallProgress(progress => {
 
 function esc(value) { const node = document.createElement('span'); node.textContent = value || ''; return node.innerHTML; }
 
-function renderApps() {
-  $('#apps').innerHTML = apps.map(app => `<label class="row"><input type="checkbox" data-app="${app.id}"><img src="../../assets/app.png" alt=""><span><strong>${esc(app.name)}</strong><small>${app.fast ? 'Fast removal · ' : ''}${esc(app.detail)}</small></span><b>${format(app.size)}</b></label>`).join('') || '<p class="loading">No registered uninstallers found.</p>';
+function renderApps(selected = new Set()) {
+  $('#apps').innerHTML = apps.map(app => `<label class="row"><input type="checkbox" data-app="${app.id}"${selected.has(app.id) ? ' checked' : ''}><img src="../../assets/app.png" alt=""><span><strong>${esc(app.name)}</strong><small>${app.fast ? 'Fast removal · ' : ''}${esc(app.detail)}</small></span><b>${format(app.size)}</b></label>`).join('') || '<p class="loading">No registered uninstallers found.</p>';
   document.querySelectorAll('[data-app]').forEach(box => box.addEventListener('change', updateAppButton));
   updateAppButton();
+}
+
+async function refreshApps({ manual = false } = {}) {
+  if (appScanPromise) return appScanPromise;
+  const button = $('#refreshApps');
+  const selected = new Set([...document.querySelectorAll('[data-app]:checked')].map(box => box.dataset.app));
+  const previous = new Set(apps.map(app => app.id));
+  if (manual) {
+    button.disabled = true;
+    button.textContent = 'Refreshing…';
+  }
+  appScanPromise = (async () => {
+    try {
+      const nextApps = await window.pluck.scanApps();
+      const added = nextApps.filter(app => !previous.has(app.id)).length;
+      apps = nextApps;
+      renderApps(selected);
+      if (!selected.size && added && previous.size) $('#appCount').textContent = `${added} new ${added === 1 ? 'app' : 'apps'} found`;
+      else if (!selected.size && manual) $('#appCount').textContent = 'Up to date';
+    } catch {
+      if (manual) $('#appCount').textContent = 'Couldn’t refresh';
+    } finally {
+      appScanPromise = null;
+      button.disabled = false;
+      button.textContent = 'Refresh';
+    }
+  })();
+  return appScanPromise;
 }
 
 function updateAppButton() {
@@ -58,8 +87,7 @@ $('#uninstallButton').addEventListener('click', async () => {
     const result = await window.pluck.uninstall(ids);
     if (!result.cancelled) {
       await new Promise(resolve => setTimeout(resolve, 750));
-      apps = await window.pluck.scanApps();
-      renderApps();
+      await refreshApps();
       if (result.completed) $('#appCount').textContent = `${result.completed} removed`;
     }
   } catch (error) {
@@ -69,6 +97,7 @@ $('#uninstallButton').addEventListener('click', async () => {
     button.disabled = document.querySelectorAll('[data-app]:checked').length === 0;
   }
 });
+$('#refreshApps').addEventListener('click', () => refreshApps({ manual: true }));
 $('#reclaimButton').addEventListener('click', async () => {
   const ids = [...document.querySelectorAll('[data-reclaim]:checked')].map(box => box.dataset.reclaim);
   const result = await window.pluck.reclaim(ids);
@@ -80,3 +109,11 @@ $('#admin').addEventListener('click', () => window.pluck.restartAsAdmin());
 $('#quit').addEventListener('click', () => window.pluck.quit());
 
 load();
+
+setInterval(() => {
+  if (document.visibilityState === 'visible' && $('#uninstall').classList.contains('active')) refreshApps();
+}, 15000);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && $('#uninstall').classList.contains('active')) refreshApps();
+});

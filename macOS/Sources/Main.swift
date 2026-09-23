@@ -107,6 +107,10 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
     private var installedApps: [CleanupItem] = []
     private var reclaimItems: [CleanupItem] = []
     private var systemPurgeableBytes: Int64 = 0
+    private var appSizeCache: [String: Int64] = [:]
+    private var lastAppRefresh = Date.distantPast
+    private var appRefreshTimer: Timer?
+    private var appScanInProgress = false
     private var busy = false { didSet { updateUI() } }
     private var reclaimMode: Bool { segmented.selectedSegment == 1 }
 
@@ -122,6 +126,14 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         super.viewDidAppear()
         refreshPermission()
         refreshStorage()
+        if !reclaimMode && Date().timeIntervalSince(lastAppRefresh) > 10 { loadInstalledApps(showActivity: false) }
+        startAppRefreshTimer()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        appRefreshTimer?.invalidate()
+        appRefreshTimer = nil
     }
 
     private func makeUI() {
@@ -264,11 +276,27 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
 
     @objc private func refreshAction() {
         if reclaimMode { scanReclaimable() }
-        else { loadInstalledApps() }
+        else { loadInstalledApps(forceSizes: true) }
     }
 
-    private func loadInstalledApps() {
-        busy = true
+    private func startAppRefreshTimer() {
+        appRefreshTimer?.invalidate()
+        let timer = Timer(timeInterval: 15, target: self, selector: #selector(autoRefreshInstalledApps), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        appRefreshTimer = timer
+    }
+
+    @objc private func autoRefreshInstalledApps() {
+        guard !reclaimMode, !busy, view.window?.isVisible == true else { return }
+        loadInstalledApps(showActivity: false)
+    }
+
+    private func loadInstalledApps(forceSizes: Bool = false, showActivity: Bool = true) {
+        guard !busy, !appScanInProgress else { return }
+        let cachedSizes = appSizeCache
+        let selectedPaths = Set(installedApps.filter(\.selected).map { $0.url.standardizedFileURL.path })
+        appScanInProgress = true
+        if showActivity { busy = true }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let manager = FileManager.default
             let roots = [URL(fileURLWithPath: "/Applications"), manager.homeDirectoryForCurrentUser.appendingPathComponent("Applications")]
@@ -280,7 +308,7 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
                     guard Bundle(url: url)?.bundleIdentifier != "ca.goodtools.pluck" else { continue }
                     let path = url.standardizedFileURL.path
                     guard seen.insert(path).inserted else { continue }
-                    apps.append(CleanupItem(url: url, kind: "Application", size: 0, detail: root.path == "/Applications" ? "Applications" : "Your Applications", selected: false))
+                    apps.append(CleanupItem(url: url, kind: "Application", size: 0, detail: root.path == "/Applications" ? "Applications" : "Your Applications", selected: selectedPaths.contains(path)))
                 }
             }
             apps.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
@@ -293,6 +321,11 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
             sizeQueue.maxConcurrentOperationCount = 4
             for index in discovered.indices {
                 let url = discovered[index].url
+                let path = url.standardizedFileURL.path
+                if !forceSizes, let cached = cachedSizes[path] {
+                    sizes[index] = cached
+                    continue
+                }
                 sizeQueue.addOperation {
                     let measured = CleanupEngine.allocatedSize(at: url)
                     sizeLock.lock()
@@ -306,9 +339,13 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
             }
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.appScanInProgress = false
+                if !showActivity && self.busy { return }
                 self.installedApps = apps
+                self.appSizeCache = Dictionary(uniqueKeysWithValues: apps.map { ($0.url.standardizedFileURL.path, $0.size) })
+                self.lastAppRefresh = Date()
                 self.appItems = []
-                self.busy = false
+                if showActivity { self.busy = false }
                 self.table.reloadData()
                 self.updateUI()
             }
@@ -452,8 +489,8 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         scroll.isHidden = !hasRows
         storageCard.isHidden = false
         emptyTrash.isHidden = !reclaimMode
-        refresh.title = "Scan"
-        refresh.isHidden = !reclaimMode
+        refresh.title = reclaimMode ? "Scan" : "Refresh"
+        refresh.isHidden = false
         let selected = (reclaimMode ? reclaimItems : uninstallRows).contains { $0.selected && $0.kind != "Trash" }
         primary.title = reclaimMode ? "Reclaim" : "Uninstall"
         primary.isEnabled = !busy && selected

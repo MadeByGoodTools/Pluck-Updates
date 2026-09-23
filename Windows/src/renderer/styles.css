@@ -37,6 +37,7 @@ input[type=checkbox]:checked::after { content: "✓"; display: block; text-align
 .details .row { grid-template-columns: 24px 38px minmax(0,1fr) 96px; }
 .loading { color: #9699a4; text-align: center; margin-top: 42px; }
 footer { display: flex; align-items: end; gap: 10px; padding-top: 10px; color: #8e919a; font-size: 11px; }
+#uninstall footer #appCount { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .primary { margin-left: auto; padding: 9px 17px; border-radius: 9px; background: #aa52b8; font-weight: 650; }
 #reclaim footer #emptyTrash { margin-left: auto; }
 #reclaim footer .primary { margin-left: 0; }

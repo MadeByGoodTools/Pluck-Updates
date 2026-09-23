@@ -181,7 +181,9 @@ async function scanInstalledApps() {
     const list = Array.isArray(values) ? values : [values];
     applications.clear();
     return list.map(value => {
-      const id = crypto.randomUUID();
+      const identity = [value.Kind, value.PSPath, value.PackageFullName, value.PSChildName, value.UninstallString, value.DisplayName]
+        .filter(Boolean).join('|').toLowerCase();
+      const id = crypto.createHash('sha256').update(identity).digest('hex').slice(0, 24);
       applications.set(id, value);
       const install = String(value.InstallLocation || '');
       const localPrograms = path.join(process.env.LOCALAPPDATA || '', 'Programs').toLowerCase();
