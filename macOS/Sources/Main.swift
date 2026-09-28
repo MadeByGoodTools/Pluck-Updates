@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import UniformTypeIdentifiers
 
 private func birdHeadImage(pointSize: CGFloat) -> NSImage {
@@ -100,6 +101,7 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
     private let refresh = NSButton(title: "Refresh", target: nil, action: nil)
     private let quit = NSButton(title: "Quit", target: nil, action: nil)
     private let emptyTrash = NSButton(title: "Empty Trash…", target: nil, action: nil)
+    private let launchAtLogin = NSButton(checkboxWithTitle: "Launch at Login", target: nil, action: nil)
     private let progress = NSProgressIndicator()
     private let dropView = DropView()
 
@@ -118,6 +120,7 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 680))
         makeUI()
         refreshPermission()
+        refreshLaunchAtLogin()
         refreshStorage()
         loadInstalledApps()
     }
@@ -159,13 +162,20 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         segmented.selectedSegment = 0
         segmented.target = self
         segmented.action = #selector(modeChanged)
+        segmented.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         permissionLabel.font = .systemFont(ofSize: 11, weight: .medium)
         utility.font = .systemFont(ofSize: 11)
         utility.bezelStyle = .inline
         utility.target = self
         utility.action = #selector(openPermissions)
-        let permissionRow = NSStackView(views: [permissionLabel, NSView(), utility])
+        launchAtLogin.font = .systemFont(ofSize: 11)
+        launchAtLogin.target = self
+        launchAtLogin.action = #selector(launchAtLoginChanged(_:))
+        launchAtLogin.toolTip = "Show Pluck in the menu bar automatically when you sign in"
+        launchAtLogin.setContentHuggingPriority(.required, for: .horizontal)
+        launchAtLogin.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let permissionRow = NSStackView(views: [permissionLabel, NSView(), launchAtLogin, utility])
         permissionRow.orientation = .horizontal
         permissionRow.alignment = .centerY
 
@@ -224,9 +234,17 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         refresh.action = #selector(refreshAction)
         emptyTrash.target = self
         emptyTrash.action = #selector(emptyTrashAction)
+        emptyTrash.toolTip = "Permanently delete everything currently in Trash"
         primary.target = self
         primary.action = #selector(primaryAction)
         primary.keyEquivalent = "\r"
+        for button in [refresh, emptyTrash, primary] {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        refresh.widthAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
+        emptyTrash.widthAnchor.constraint(greaterThanOrEqualToConstant: 118).isActive = true
+        primary.widthAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
         let actions = NSStackView(views: [progress, refresh, NSView(), emptyTrash, primary])
         actions.orientation = .horizontal
         actions.alignment = .centerY
@@ -454,11 +472,41 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         alert.informativeText = "Every item currently in Trash will be deleted. This cannot be undone."
         alert.addButton(withTitle: "Empty Trash"); alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
-        if alert.runModal() == .alertFirstButtonReturn { _ = CleanupEngine.emptyTrash(); refreshStorage(); scanReclaimable() }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        busy = true
+        let emptied = CleanupEngine.emptyTrash()
+        busy = false
+        if !emptied {
+            let error = NSAlert()
+            error.messageText = "Trash could not be emptied"
+            error.informativeText = "Check that Pluck has Full Disk Access, then try again."
+            error.alertStyle = .warning
+            error.runModal()
+        }
+        refreshStorage()
+        scanReclaimable()
     }
 
     @objc private func openPermissions() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) }
+    }
+
+    @objc private func launchAtLoginChanged(_ sender: NSButton) {
+        do {
+            if sender.state == .on { try SMAppService.mainApp.register() }
+            else { try SMAppService.mainApp.unregister() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Launch at Login could not be changed"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+        refreshLaunchAtLogin()
+    }
+
+    private func refreshLaunchAtLogin() {
+        launchAtLogin.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
@@ -489,6 +537,7 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         scroll.isHidden = !hasRows
         storageCard.isHidden = false
         emptyTrash.isHidden = !reclaimMode
+        emptyTrash.isEnabled = reclaimMode && !busy
         refresh.title = reclaimMode ? "Scan" : "Refresh"
         refresh.isHidden = false
         let selected = (reclaimMode ? reclaimItems : uninstallRows).contains { $0.selected && $0.kind != "Trash" }

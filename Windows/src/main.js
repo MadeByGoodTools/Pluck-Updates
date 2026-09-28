@@ -149,6 +149,11 @@ app.on('second-instance', positionAndShow);
 app.on('window-all-closed', () => {});
 
 ipcMain.handle('snapshot', async () => ({ ...(await storageSnapshot()), admin: await isAdministrator() }));
+ipcMain.handle('get-launch-at-login', () => app.getLoginItemSettings().openAtLogin);
+ipcMain.handle('set-launch-at-login', (_event, enabled) => {
+  app.setLoginItemSettings({ openAtLogin: Boolean(enabled), path: process.execPath });
+  return app.getLoginItemSettings().openAtLogin;
+});
 
 async function scanInstalledApps() {
   const script = `

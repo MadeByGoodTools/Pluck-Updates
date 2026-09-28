@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('pluck', {
   },
   reclaim: ids => ipcRenderer.invoke('reclaim', ids),
   emptyTrash: () => ipcRenderer.invoke('empty-trash'),
+  getLaunchAtLogin: () => ipcRenderer.invoke('get-launch-at-login'),
+  setLaunchAtLogin: enabled => ipcRenderer.invoke('set-launch-at-login', enabled),
   restartAsAdmin: () => ipcRenderer.invoke('restart-admin'),
   quit: () => ipcRenderer.send('quit')
 });

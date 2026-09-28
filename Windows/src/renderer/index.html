@@ -16,7 +16,7 @@
 
     <nav><button data-tab="uninstall" class="active">Uninstall</button><button data-tab="reclaim">Reclaim</button></nav>
 
-    <section class="permission" id="permission"><span id="permissionText">Checking permissions…</span><button id="admin" class="quiet">Run as administrator</button></section>
+    <section class="permission" id="permission"><span id="permissionText">Checking permissions…</span><label class="startup"><input id="launchAtLogin" type="checkbox">Launch at login</label><button id="admin" class="quiet">Run as administrator</button></section>
 
     <section class="storage">
       <div><span>FREE</span><strong id="free">—</strong></div>
@@ -31,7 +31,7 @@
 
     <section id="reclaim" class="tab">
       <div class="list details" id="reclaimables"><p class="loading">Scanning safe locations…</p></div>
-      <footer><button id="scan" class="quiet">Scan</button><button id="emptyTrash" class="quiet">Empty Recycle Bin…</button><button id="reclaimButton" class="primary" disabled>Reclaim</button></footer>
+      <footer><button id="scan" class="quiet">Scan</button><button id="emptyTrash" class="trash-action">Empty Recycle Bin…</button><button id="reclaimButton" class="primary" disabled>Reclaim</button></footer>
     </section>
   </main>
   <script src="renderer.js"></script>

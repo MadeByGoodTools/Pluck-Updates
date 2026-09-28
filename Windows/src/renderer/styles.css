@@ -12,10 +12,14 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; }
 .quiet:hover { background: #2a2c32; color: #fff; }
 #quit { margin-left: auto; }
 nav { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: #282a30; }
-nav button { background: transparent; border-radius: 8px; font-weight: 600; color: #b9bbc3; }
+nav button { min-width: 0; white-space: nowrap; background: transparent; border-radius: 8px; font-weight: 600; color: #b9bbc3; }
 nav button.active { background: #aa52b8; color: #fff; box-shadow: 0 1px 3px #0008; }
-.permission { display: flex; align-items: center; font-size: 12px; color: #52d77c; }
-.permission button { margin-left: auto; font-size: 11px; }
+.permission { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #52d77c; }
+.permission > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.permission button { flex: 0 0 auto; white-space: nowrap; font-size: 11px; }
+.startup { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #c4c6cd; white-space: nowrap; cursor: pointer; }
+.startup input[type=checkbox] { width: 16px; height: 16px; }
+.startup input[type=checkbox]:checked::after { line-height: 14px; font-size: 12px; }
 .storage { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 1px; padding: 9px 8px; border-radius: 12px; background: linear-gradient(135deg, #382b3e, #292632); border: 1px solid #5a3a61; }
 .storage div { text-align: center; display: grid; gap: 3px; }
 .storage .available { grid-column: 1 / -1; display: flex; justify-content: center; gap: 10px; align-items: baseline; }
@@ -37,10 +41,16 @@ input[type=checkbox]:checked::after { content: "✓"; display: block; text-align
 .details .row { grid-template-columns: 24px 38px minmax(0,1fr) 96px; }
 .loading { color: #9699a4; text-align: center; margin-top: 42px; }
 footer { display: flex; align-items: end; gap: 10px; padding-top: 10px; color: #8e919a; font-size: 11px; }
-#uninstall footer #appCount { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+footer button { flex: 0 0 auto; white-space: nowrap; }
+#uninstall footer #appCount { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .primary { margin-left: auto; padding: 9px 17px; border-radius: 9px; background: #aa52b8; font-weight: 650; }
+#uninstallButton { min-width: 112px; text-align: center; }
+#reclaimButton { min-width: 86px; text-align: center; }
 #reclaim footer #emptyTrash { margin-left: auto; }
 #reclaim footer .primary { margin-left: 0; }
+.trash-action { min-width: 142px; padding: 8px 12px; border: 1px solid #555962; border-radius: 9px; background: #2a2c32; color: #ececf0; }
+.trash-action:hover:not(:disabled) { border-color: #777b86; background: #33363d; }
+.trash-action:disabled { opacity: .55; cursor: default; }
 .primary:hover:not(:disabled) { background: #bb61c8; }
 .primary:disabled { opacity: .38; cursor: default; }
 ::-webkit-scrollbar { width: 10px; } ::-webkit-scrollbar-thumb { background: #4b4e57; border: 3px solid #1d1f24; border-radius: 10px; }

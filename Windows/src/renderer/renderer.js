@@ -62,12 +62,20 @@ function updateReclaimButton() {
   $('#reclaimButton').disabled = document.querySelectorAll('[data-reclaim]:checked').length === 0;
 }
 
+async function loadStorage() {
+  const snapshot = await window.pluck.snapshot();
+  const total = reclaimables.reduce((sum, item) => sum + item.size, 0);
+  $('#free').textContent = format(snapshot.free);
+  $('#available').textContent = format(snapshot.free + total);
+}
+
 async function load() {
-  const [snapshot, appList, cleanup] = await Promise.all([window.pluck.snapshot(), window.pluck.scanApps(), window.pluck.scanReclaimable()]);
+  const [snapshot, appList, cleanup, launchAtLogin] = await Promise.all([window.pluck.snapshot(), window.pluck.scanApps(), window.pluck.scanReclaimable(), window.pluck.getLaunchAtLogin()]);
   apps = appList; reclaimables = cleanup;
   $('#free').textContent = format(snapshot.free);
   $('#permissionText').textContent = snapshot.admin ? '✓ Administrator access enabled' : 'Standard access · administrator is optional';
   $('#admin').hidden = snapshot.admin;
+  $('#launchAtLogin').checked = launchAtLogin;
   renderApps(); renderReclaimables();
   const total = reclaimables.reduce((sum, item) => sum + item.size, 0);
   $('#available').textContent = format(snapshot.free + total);
@@ -104,7 +112,31 @@ $('#reclaimButton').addEventListener('click', async () => {
   if (result.ok) { reclaimables = await window.pluck.scanReclaimable(); renderReclaimables(); }
 });
 $('#scan').addEventListener('click', async () => { reclaimables = await window.pluck.scanReclaimable(); renderReclaimables(); });
-$('#emptyTrash').addEventListener('click', () => window.pluck.emptyTrash());
+$('#launchAtLogin').addEventListener('change', async event => {
+  const checkbox = event.currentTarget;
+  checkbox.disabled = true;
+  try {
+    checkbox.checked = await window.pluck.setLaunchAtLogin(checkbox.checked);
+  } finally {
+    checkbox.disabled = false;
+  }
+});
+$('#emptyTrash').addEventListener('click', async () => {
+  const button = $('#emptyTrash');
+  button.disabled = true;
+  button.textContent = 'Emptying…';
+  try {
+    const emptied = await window.pluck.emptyTrash();
+    if (emptied) {
+      reclaimables = await window.pluck.scanReclaimable();
+      renderReclaimables();
+      await loadStorage();
+    }
+  } finally {
+    button.textContent = 'Empty Recycle Bin…';
+    button.disabled = false;
+  }
+});
 $('#admin').addEventListener('click', () => window.pluck.restartAsAdmin());
 $('#quit').addEventListener('click', () => window.pluck.quit());
 
