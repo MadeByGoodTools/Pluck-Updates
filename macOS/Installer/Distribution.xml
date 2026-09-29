@@ -9,5 +9,5 @@
   <choice id="pluck" visible="false" title="Pluck">
     <pkg-ref id="ca.goodtools.pluck.pkg"/>
   </choice>
-  <pkg-ref id="ca.goodtools.pluck.pkg" version="0.1.0" onConclusion="none">Pluck-component.pkg</pkg-ref>
+  <pkg-ref id="ca.goodtools.pluck.pkg" version="0.1.4" onConclusion="none">Pluck-component.pkg</pkg-ref>
 </installer-gui-script>

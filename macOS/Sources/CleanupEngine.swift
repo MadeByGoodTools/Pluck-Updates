@@ -169,7 +169,69 @@ enum CleanupEngine {
             do {
                 _ = try await NSWorkspace.shared.recycle([url])
             } catch {
-                throw CleanupError.recycleFailed("Could not move \(url.lastPathComponent) to Trash: \(error.localizedDescription)")
+                guard isProtectedInstalledApp(url) else {
+                    throw CleanupError.recycleFailed("Could not move \(url.lastPathComponent) to Trash: \(error.localizedDescription)")
+                }
+                do {
+                    try await recycleProtectedAppWithAdministratorApproval(url)
+                } catch {
+                    throw CleanupError.recycleFailed("Could not move \(url.lastPathComponent) to Trash after requesting administrator approval: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private static func isProtectedInstalledApp(_ url: URL) -> Bool {
+        let normalized = url.standardizedFileURL.path
+        guard url.pathExtension.lowercased() == "app",
+              normalized.hasPrefix("/Applications/") else { return false }
+        let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
+        return values?.isSymbolicLink != true
+    }
+
+    private static func recycleProtectedAppWithAdministratorApproval(_ url: URL) async throws {
+        let trash = home.appendingPathComponent(".Trash", isDirectory: true)
+        var destination = trash.appendingPathComponent(url.lastPathComponent)
+        if fileManager.fileExists(atPath: destination.path) {
+            let name = url.deletingPathExtension().lastPathComponent
+            let suffix = String(UUID().uuidString.prefix(8)).lowercased()
+            destination = trash.appendingPathComponent("\(name)-\(suffix).app")
+        }
+
+        let script = """
+        on run argv
+            if (count of argv) is not 2 then error "Pluck expected a source and Trash destination."
+            set sourcePath to item 1 of argv
+            set destinationPath to item 2 of argv
+            do shell script "/bin/mv " & quoted form of sourcePath & " " & quoted form of destinationPath with administrator privileges
+        end run
+        """
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                let errors = Pipe()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                process.arguments = ["-e", script, url.path, destination.path]
+                process.standardOutput = Pipe()
+                process.standardError = errors
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    guard process.terminationStatus == 0 else {
+                        let data = errors.fileHandleForReading.readDataToEndOfFile()
+                        let detail = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let message = detail?.isEmpty == false ? detail : nil
+                        throw CleanupError.recycleFailed(message ?? "Administrator approval was cancelled or macOS denied the move.")
+                    }
+                    guard !fileManager.fileExists(atPath: url.path),
+                          fileManager.fileExists(atPath: destination.path) else {
+                        throw CleanupError.recycleFailed("macOS reported success, but the app did not arrive in Trash.")
+                    }
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }

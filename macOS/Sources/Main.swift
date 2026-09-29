@@ -389,9 +389,11 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
                 let chosen = results.filter(\.selected)
                 let relatedCount = chosen.filter { $0.kind != "Application" }.count
                 let bytes = chosen.reduce(0) { $0 + $1.size }
+                let needsAdministratorApproval = chosen.contains { !FileManager.default.isWritableFile(atPath: $0.url.path) }
                 let alert = NSAlert()
                 alert.messageText = "Uninstall \(selected.count == 1 ? selected[0].displayName : "\(selected.count) apps")?"
                 alert.informativeText = "Pluck found \(relatedCount) high-confidence related item\(relatedCount == 1 ? "" : "s"). About \(self.format(bytes)) will move to Trash and remain recoverable until Trash is emptied."
+                    + (needsAdministratorApproval ? "\n\nmacOS will ask for administrator approval to move the protected app." : "")
                 alert.addButton(withTitle: "Uninstall")
                 alert.addButton(withTitle: "Cancel")
                 alert.alertStyle = .warning
