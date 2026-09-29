@@ -11,6 +11,16 @@ rm -rf "$dist_dir/Pluck.app" "$dist_dir/Pluck-macOS.zip" \
   "$dist_dir/GoodTools-Installer-Pluck-macOS-Apple-Silicon.pkg"
 mkdir -p "$build_dir" "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 
+icon_source="$project_dir/../Windows/assets/pluck.png"
+iconset="$build_dir/AppIcon.iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$icon_source" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  doubled=$((size * 2))
+  sips -z "$doubled" "$doubled" "$icon_source" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$app_dir/Contents/Resources/AppIcon.icns"
+
 xcrun swiftc \
   -O \
   -target arm64-apple-macos13.0 \
@@ -32,7 +42,7 @@ pkgbuild \
   --component "$app_dir" \
   --install-location /Applications \
   --identifier ca.goodtools.pluck.pkg \
-  --version 0.1.4 \
+  --version 0.1.5 \
   "$component_pkg"
 
 productbuild \
