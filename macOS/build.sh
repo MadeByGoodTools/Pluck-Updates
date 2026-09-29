@@ -42,7 +42,7 @@ pkgbuild \
   --component "$app_dir" \
   --install-location /Applications \
   --identifier ca.goodtools.pluck.pkg \
-  --version 0.1.5 \
+  --version 0.1.6 \
   "$component_pkg"
 
 productbuild \

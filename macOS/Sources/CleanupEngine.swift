@@ -25,6 +25,7 @@ enum CleanupError: LocalizedError {
     case protectedApp
     case nothingSelected
     case recycleFailed(String)
+    case trashEmptyFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +33,7 @@ enum CleanupError: LocalizedError {
         case .protectedApp: return "Apps supplied by macOS are protected and cannot be removed here."
         case .nothingSelected: return "Select at least one item first."
         case .recycleFailed(let message): return message
+        case .trashEmptyFailed(let message): return message
         }
     }
 }
@@ -236,11 +238,139 @@ enum CleanupEngine {
         }
     }
 
-    static func emptyTrash() -> Bool {
-        let script = "tell application \"Finder\" to empty trash"
-        var errorInfo: NSDictionary?
-        let result = NSAppleScript(source: script)?.executeAndReturnError(&errorInfo)
-        return result != nil && errorInfo == nil
+    static func emptyTrash(
+        at suppliedRoots: [URL]? = nil,
+        requestAdministratorIfNeeded: Bool = true
+    ) async throws -> Int {
+        let roots = suppliedRoots ?? trashLocations()
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    var removed = 0
+                    var blocked: [URL] = []
+
+                    for root in roots {
+                        guard fileManager.fileExists(atPath: root.path) else { continue }
+                        let entries: [URL]
+                        do {
+                            entries = try fileManager.contentsOfDirectory(
+                                at: root,
+                                includingPropertiesForKeys: nil,
+                                options: []
+                            )
+                        } catch {
+                            throw CleanupError.trashEmptyFailed(
+                                "Pluck could not read \(root.path). Confirm Full Disk Access is enabled for this copy of Pluck, then reopen it."
+                            )
+                        }
+
+                        for entry in entries {
+                            do {
+                                try fileManager.removeItem(at: entry)
+                                removed += 1
+                            } catch {
+                                blocked.append(entry)
+                            }
+                        }
+                    }
+
+                    if !blocked.isEmpty {
+                        guard requestAdministratorIfNeeded else {
+                            throw CleanupError.trashEmptyFailed(
+                                "\(blocked.count) Trash item\(blocked.count == 1 ? " is" : "s are") protected by file ownership."
+                            )
+                        }
+                        try removeTrashItemsWithAdministratorApproval(blocked, allowedRoots: roots)
+                        removed += blocked.count
+                    }
+
+                    let remaining = roots.flatMap { root in
+                        (try? fileManager.contentsOfDirectory(
+                            at: root,
+                            includingPropertiesForKeys: nil,
+                            options: []
+                        )) ?? []
+                    }
+                    guard remaining.isEmpty else {
+                        throw CleanupError.trashEmptyFailed(
+                            "\(remaining.count) Trash item\(remaining.count == 1 ? " remains" : "s remain") after cleanup."
+                        )
+                    }
+                    continuation.resume(returning: removed)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func trashLocations() -> [URL] {
+        var roots = [home.appendingPathComponent(".Trash", isDirectory: true)]
+        let keys: Set<URLResourceKey> = [.volumeIsReadOnlyKey]
+        let volumes = fileManager.mountedVolumeURLs(
+            includingResourceValuesForKeys: Array(keys),
+            options: [.skipHiddenVolumes]
+        ) ?? []
+        let uid = String(getuid())
+
+        for volume in volumes {
+            guard volume.path != "/" else { continue }
+            let values = try? volume.resourceValues(forKeys: keys)
+            guard values?.volumeIsReadOnly != true else { continue }
+            let trash = volume
+                .appendingPathComponent(".Trashes", isDirectory: true)
+                .appendingPathComponent(uid, isDirectory: true)
+            if fileManager.fileExists(atPath: trash.path) {
+                roots.append(trash)
+            }
+        }
+        return roots
+    }
+
+    private static func removeTrashItemsWithAdministratorApproval(
+        _ urls: [URL],
+        allowedRoots: [URL]
+    ) throws {
+        let allowedParents = Set(allowedRoots.map { $0.standardizedFileURL.path })
+        let safeURLs = urls.filter {
+            allowedParents.contains($0.deletingLastPathComponent().standardizedFileURL.path)
+        }
+        guard safeURLs.count == urls.count else {
+            throw CleanupError.trashEmptyFailed("Pluck refused to delete an item outside a recognized Trash folder.")
+        }
+
+        let script = """
+        on run argv
+            repeat with itemPath in argv
+                do shell script "/bin/rm -rf " & quoted form of itemPath with administrator privileges
+            end repeat
+        end run
+        """
+        let process = Process()
+        let errors = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script] + safeURLs.map(\.path)
+        process.standardOutput = Pipe()
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let data = errors.fileHandleForReading.readDataToEndOfFile()
+            let detail = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CleanupError.trashEmptyFailed(
+                detail?.isEmpty == false
+                    ? detail!
+                    : "Administrator approval was cancelled or macOS denied the cleanup."
+            )
+        }
+
+        let remaining = safeURLs.filter { fileManager.fileExists(atPath: $0.path) }
+        guard remaining.isEmpty else {
+            throw CleanupError.trashEmptyFailed(
+                "\(remaining.count) protected Trash item\(remaining.count == 1 ? " was" : "s were") not removed."
+            )
+        }
     }
 
     static func allocatedSize(at url: URL) -> Int64 {

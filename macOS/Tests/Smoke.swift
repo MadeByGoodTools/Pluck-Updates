@@ -2,7 +2,7 @@ import Foundation
 
 @main
 enum SmokeTest {
-    static func main() throws {
+    static func main() async throws {
         let snapshot = CleanupEngine.storageSnapshot()
         precondition(snapshot.total > 0)
         precondition(snapshot.freeNow >= 0)
@@ -26,6 +26,23 @@ enum SmokeTest {
             precondition(results.first?.kind == "Application")
             precondition(results.first?.url == sample)
         }
+
+        let temporaryTrash = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pluck-Smoke-Trash-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryTrash, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryTrash) }
+        try Data("test".utf8).write(to: temporaryTrash.appendingPathComponent("ordinary.txt"))
+        try Data("hidden".utf8).write(to: temporaryTrash.appendingPathComponent(".hidden"))
+        let nested = temporaryTrash.appendingPathComponent("Folder", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Data("nested".utf8).write(to: nested.appendingPathComponent("nested.txt"))
+        let removed = try await CleanupEngine.emptyTrash(
+            at: [temporaryTrash],
+            requestAdministratorIfNeeded: false
+        )
+        precondition(removed == 3)
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: temporaryTrash.path)
+        precondition(remaining.isEmpty)
         print("Smoke test passed")
     }
 }

@@ -476,17 +476,20 @@ final class PanelController: NSViewController, NSTableViewDataSource, NSTableVie
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         busy = true
-        let emptied = CleanupEngine.emptyTrash()
-        busy = false
-        if !emptied {
-            let error = NSAlert()
-            error.messageText = "Trash could not be emptied"
-            error.informativeText = "Check that Pluck has Full Disk Access, then try again."
-            error.alertStyle = .warning
-            error.runModal()
+        Task { @MainActor in
+            do {
+                _ = try await CleanupEngine.emptyTrash()
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Trash could not be emptied"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+            busy = false
+            refreshStorage()
+            scanReclaimable()
         }
-        refreshStorage()
-        scanReclaimable()
     }
 
     @objc private func openPermissions() {
